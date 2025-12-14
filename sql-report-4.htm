@@ -1,0 +1,186 @@
+<~Code>
+   ' Global Variables
+   dim LastMachineID   ' to hold the current Community being processed
+   
+   ' ***************************************************************************
+   '   Init function used to initialize vars for datMachineUsers14
+   ' ***************************************************************************
+   Function datMachineUsers14_Init()
+      ' Initialize this global
+      LastMachineID=-1
+   End Function
+
+   '******************************************************************************
+   '_FHDR: datMachineUsers14_xRow
+   '
+   '_PURPOSE:
+   '   Transfer record set data into the data matrix.
+   '   Adds a community row to the data matrix for each new community encountered.
+   '   Called for each row in dataset, after sql-segment has been loaded and executed.
+   '
+   '_PARAMS:
+   '   rowNum   Current RowNumber of incoming data set. 1-based
+   '
+   '_RETURNS:
+   '  Responsible for creating and manipulating the report-segment's Data array.
+   '
+   '_DETAIL:
+   '   Create an ((N)r x 7c) array. 
+   '      - Columns:   MachineID,
+   '               MachineName,
+   '               UserID,
+   '               UserName,
+   '               LogonName,
+   '               MachineName,
+   '               PrimaryUser,
+   '   We assume a comm will always be present since the context is comm based
+   '******************************************************************************
+   Function datMachineUsers14_xRow( rowNum )
+      dim Data
+      dim iCol
+      dim curRow
+      dim machineNameCol      
+      ' get handle to data array
+      set Data = Report.Data("datMachineUsers14")
+      ' skip the xRow code if the query returned nothing
+      if Data.Columns < 0 then
+         set Data = nothing
+         Exit Function
+      end if
+      ' add if the user's name is not "0".  must compare strings here to prevent a type mismatch error
+      if Data.Field("UserName") <> "0" then
+         ' add a new User row; determines the rows background color
+         curRow = Data.AddRow("wi")
+         ' directly transfer the category and raw sum-usage data to the Data array
+         for iCol = 1 to Data.Columns
+            Data.Val(curRow,iCol) = Data.Field(iCol-1)
+         next
+	 Data.Val(curRow, 7) = Data.Field("LastLogonDate")
+      end if
+      'Cleanup
+      set Data = nothing
+   End Function
+</~Code>
+<~GridColumn Name="MachineId"
+         DataType="IO"
+ System="1"/>
+<~GridColumn Name="MachineName"
+         Caption="Machine Name"
+         DataType="S"
+         Width="4300"
+         SortOrder="1"
+         GroupOrder="1"/>
+<~GridColumn Name="UserID"
+         DataType="IO"
+         System="1"/>
+<~GridColumn Name="UserName"
+         Caption="User Name"
+         DataType="S"
+         Width="4300"/>
+<~GridColumn Name="LogonName"
+ Caption="Logon Name"
+         DataType="S"
+         Width="4300"/>
+<~GridColumn Name="PrimaryUser" 
+         Caption="Primary User"
+         DataType="S"
+         Width="2000"/>
+<~GridColumn Name="LastLogonDate" 
+         Caption="Last Logon"
+         DataType="DS"
+         Width="2000"/>
+<~GridSQL name=datMachineUsers14 columns=7>
+/*
+'     Widget 14
+'
+'   - Columns: MachineID
+'            MachineName,
+'	     UserID
+'            UserName,
+'            LogonName,
+'            PrimaryUser
+*/
+SELECT DISTINCT M.MachineID
+, M.Name MachineName
+, isnull(U.UserID, 0) UserID
+, isnull(U.UserName, 'Local User') UserName
+, isnull(U.LogonName, '--') LogonName
+, CASE WHEN M.PrimaryUserID = U.UserID THEN 'Y' 
+         ELSE (CASE WHEN U.UserID IS NULL THEN '--' 
+                     ELSE 'N' END) END PrimaryUser
+, CASE WHEN M.PrimaryUserID = U.UserID THEN 0 
+         ELSE (CASE WHEN U.UserID IS NULL THEN 2
+                     ELSE 1 END) END PrimaryUserOrdering
+, LEFT(CONVERT(varchar, hw.Value), 8) AS LastLogonDate
+FROM SSIMachine M
+INNER JOIN Agent A on M.MachineID = A.MachineID
+LEFT JOIN UserMachineAggregate UMA on M.MachineID = UMA.MachineID
+LEFT JOIN SSIUser U on UMA.UserID = U.UserID
+LEFT JOIN HWData hw ON hw.MachineID = M.MachineID
+	AND hw.Status = 0 
+	AND hw.PropertyID IN (SELECT PropertyID FROM HWProperty WHERE WMIName = 'Win32_LogonSession.StartTime') --The Win32_LogonSession WMI class describes the logon session or sessions associated with a user logged on to a computer system running Windows.
+WHERE UMA.UsageDate BETWEEN [StartDate] and [EndDate]
+AND UMA.DayOfWeek <= [MaxDayOfWeek]
+AND (M.MachineID in ([MachineCollections_listMachines])
+OR M.MachineID in 
+   (select CM.ResourceID 
+   from CommunityMembership CM 
+   inner join Agent A on CM.ResourceID = A.MachineID
+   where CM.CommunityID in ([MachineCollections_listCollections])
+   and CM.ResourceType = 2))
+ORDER BY M.MachineID, PrimaryUserOrdering, UserName
+</~GridSQL>
+<script language="JavaScript" src="Reports/Scripts/drillDown.js"></script><script language="Javascript">
+   function toSoftwareInventory(machID)
+   {
+      if (parent.frContentTabs)
+      {
+         //save off the parameters
+         saveDrillDownParameters("<~Param>OutputID</~Param>","<~Param>ArchID</~Param>", 75
+                                       , populateMachineCollectionTab('MAC', machID, 1, -999, 1) +
+                                       ";" + addOldReportInformation('<~Param>ArchID</~Param>',
+                                                                     '<~Param>OutputID</~Param>',
+                                                                     '<~Param>RunID</~Param>',
+                                                                     '<~Param>FolderID</~Param>',
+                                                                     '<~Param>FolderType</~Param>'
+                                                                     )
+         );
+         return;
+      }
+      else
+      {
+         window.open("SurveyUser.ASP?SurveyUser.Drilldown.StandAloneDrilldown(75," +
+                                       populateMachineCollectionTab('MAC', machID, 1, -999, 1) +
+                                       ")",null,"location=no,menubar=no,toolbar=yes,resizable=yes");
+         return;
+      }
+   }
+</script><script language="javascript">
+   /////////////////////////////////////////////////////////////////////////
+   function <~rcName />Grid_onLoad()
+   {
+      Grid_onLoad('<~rcName />Grid', '<~rcTemplateName />');
+   }
+   /////////////////////////////////////////////////////////////////////////
+   function <~rcName />Grid_RefreshComplete(ErrCode)
+   {
+      setHeight('<~rcName />Grid');
+   }
+   /////////////////////////////////////////////////////////////////////////
+   function <~rcName />Grid_onDblClick(rowId,colName)
+   {
+      var rowType = <~rcName />Grid.RowType(rowId);
+      //This is a header row...so don't drilldown
+      if(rowType == 1)
+      {
+         return;
+      }
+      var machineID = <~rcName />Grid.Value(rowId, 'MachineID');
+      switch(colName)
+      {
+         case "MachineName":
+            toSoftwareInventory(machineID);
+            break;
+      }
+   }
+</script><~Include name=Reports/GenericGrid.htm></~Include>

@@ -1,0 +1,227 @@
+<!--
+   rc08028.htm
+
+   ReportComponent: 08028   - Machine Usage Trend
+
+   Details:
+      This widget displays a Machine Usage Trend Line Graph
+      
+         1. MachineCollections/When
+         
+      The context is detected by the presence/absence of Report.Param values that
+      are set by the various tabs and reports. The sql-statement is then selected 
+      based on the current context.
+
+     -------------------------------------------------------------------------------
+-->
+
+
+<!-----------------------------------------------------------------------------
+   SSI Code Tag: VB Scripts to support widget
+------------------------------------------------------------------------------>
+<~Code>
+
+   dim DaysInReport     ' obtain the value here once rather than multiple times elsewhere
+   DaysInReport = Report.Param("DaysInReport")
+
+   '******************************************************************************
+   '_FHDR: dat8028_Init
+   '
+   '_PURPOSE:
+   '  Used to initialize the query.
+   '
+   '_PARAMS:
+   '   none
+   '
+   '_RETURNS:
+   '  none
+   '
+   '_DETAIL:
+   '******************************************************************************   
+   Function dat8028_Init
+      Dim substitueString, substitution
+      Dim dailyFrequency
+      Dim Data   
+         
+      Set Data = Report.Data("dat8028")
+      
+      If ( Report.Param("WhenDailyFrequency_chkSunday") <> "false") Then 
+         dailyFrequency = "UU.DayofWeek = 7 OR "
+      End If
+
+      If ( Report.Param("WhenDailyFrequency_chkMonday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 1 OR "
+      End If
+      
+      If ( Report.Param("WhenDailyFrequency_chkTuesday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 2 OR "
+      End If
+      
+      If ( Report.Param("WhenDailyFrequency_chkWednesday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 3 OR "
+      End If
+      
+      If ( Report.Param("WhenDailyFrequency_chkThursday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 4 OR "
+      End If
+      
+      If ( Report.Param("WhenDailyFrequency_chkFriday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 5 OR "
+      End If
+      
+      If ( Report.Param("WhenDailyFrequency_chkSaturday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 6 OR "
+      End If                              
+
+      If ( Right(dailyFrequency, 3) = "OR " ) Then
+         dailyFrequency = Left(dailyFrequency, Len(dailyFrequency)-3)
+      End If
+      
+      If dailyFrequency = "" Then dailyFrequency = "UU.DayofWeek = 99 "
+
+      substituteString = "***CRITERIA_WHERE***"
+      If (dailyFrequency <> "") Then dailyFrequency = " AND (" & dailyFrequency & ") "
+      n = Instr(data.SQLStatement, substituteString)
+      while n <> 0
+         Data.SQLStatement = left(Data.SQLStatement, n-1) &  dailyFrequency & mid(Data.SQLStatement, n+len(substituteString))
+         n = Instr(data.SQLStatement, substituteString)
+      wend       
+
+      substituteString = "***STARTDATE***"
+      substitution = Report.Param("WhenDailyFrequency_txtFromDate")
+      n = Instr(data.SQLStatement, substituteString)
+      while n <> 0
+         Data.SQLStatement = left(Data.SQLStatement, n-1) &  substitution & mid(Data.SQLStatement, n+len(substituteString))
+         n = Instr(data.SQLStatement, substituteString)
+      wend        
+
+      substituteString = "***ENDDATE***"
+      substitution = Report.Param("WhenDailyFrequency_txtToDate")
+      n = Instr(data.SQLStatement, substituteString)
+      while n <> 0
+         Data.SQLStatement = left(Data.SQLStatement, n-1) &  substitution & mid(Data.SQLStatement, n+len(substituteString))
+         n = Instr(data.SQLStatement, substituteString)
+      wend
+                 
+   End Function
+
+   '******************************************************************************
+   '_FHDR: lin8028_Init
+   '
+   '_PURPOSE:
+   '  Used to initialize the LineChart control and set the category list from
+   '  the Report.Param data that Report.GetTimeSpan has created for us.
+   '
+   '_PARAMS:
+   '   none
+   '
+   '_RETURNS:
+   '  none
+   '
+   '_DETAIL:
+   '   Sets some chart-control params, most importantly, the Category list is
+   '   set from the Report.Param data that Report.GetTimeSpan has created for us.
+   '******************************************************************************
+   Function lin8028_Init()
+
+      Dim Chart, iDay 
+
+      ' get reference to the chart object
+      set Chart = Report.myChart
+
+      ' turn off the legend since it is not necessary
+      Chart.Param("legendOn") = "false"
+
+      ' label the x and y axis
+      Chart.param("rangeAxisLabel")    = "Hours"
+      Chart.Param("sampleAxisLabel")   = "Days"
+
+      ' if all we have is a single day, plot a point
+      if DaysInReport = 1 then
+         Chart.Param("sampleHighlightOn") = "true"
+         Chart.Param("sampleHighlightStyle") = "circle_filled"
+      end if
+
+      ' set the cats from the Report.Params already created for us in the GetTimeSpan function
+      for iDay = 1 to CLng(DaysInReport)
+         Chart.AddCategory Report.SSIDateToClientShortDate(Report.Param("ssiDateInReport_" & cstr(iDay))), Report.Param("ssiDateInReport_" & cstr(iDay))
+      next
+
+      ' Cleanup
+      set Chart = nothing          
+
+   End Function
+
+</~Code>
+
+<!-----------------------------------------------------------------------------
+   SSI SQL Tag:  Used to set SQL Statement for USER Context
+---------------------------------------------------------------------------/-->
+<~SQL name=dat8028>
+
+   /*
+      Widget 8028
+      
+      RecordSet Details:
+   
+      Column   Field Name           Friendly Name
+      ------   ----------------     -------------
+      1        UsageDate            Usage Date
+      2        ActiveDay            Active Day
+      3        MachineConstant      Machine Constant
+
+      Details:
+         Values in column 1 and 2 are used while column 3 merely contains a place
+         holder.
+         We use the values we get directly from the database.  No massaging with
+         the xRow or Term code is necessary.
+         
+   */
+
+SELECT UU.UsageDate UsageDate
+, convert(float, sum(UU.ActiveDay)) / 60.0 ActiveDay  /* convert from minutes to hours */
+, 'Total Machine Usage' MachineConstant  /* this column is simply a placeholder */
+FROM UserUsageProgramGroup UU
+WHERE UU.UsageDate BETWEEN ***STARTDATE*** AND ***ENDDATE***
+***CRITERIA_WHERE***
+AND (UU.MachineID in ([MachineCollections_listMachines])
+OR UU.MachineID in 
+   (select CM.ResourceID 
+   from CommunityMembership CM 
+   inner join Agent A on CM.ResourceID = A.MachineID
+   where CM.CommunityID in ([MachineCollections_listCollections])
+   and CM.ResourceType = 2))
+AND UU.ProgramGroupID in   
+   (select distinct PG.ProgramGroupID
+   from ProgramGroup PG
+   left join SWCategoryMembership SWCM on PG.ProgramGroupID = SWCM.ProgramGroupID
+   where (isnull(SWCM.ProgramGroupID, -666) = case when [Catalog_rdoCatalogOrSystem] = 6 then isnull(SWCM.ProgramGroupID, -666) else -666 end
+   and isnull(SWCM.CategoryID, -666) = case when [Catalog_chkUseCategories] = 1 then [Catalog_cmbCategoryID] else isnull(SWCM.CategoryID, -666) end
+   and PG.ProgramGroupType = [Catalog_rdoCatalogOrSystem])
+   or PG.ProgramGroupType in (case when [Catalog_chkShowWebApps] = 1 then 1 else -1 end, 7))
+AND UU.ActiveDay > 0
+GROUP BY UU.UsageDate
+ORDER BY UU.UsageDate
+   
+</~SQL>
+
+<!-- set the linechart colors to rotate through -->
+<~Include name="Reports\Scripts\Top10Colors.bas" type="once"></~Include>
+
+<!-----------------------------------------------------------------------------
+   This widget consists of a Line Chart
+      CATEGORY    =  UsageDate         (1)
+      VALUE       =  ActiveDay         (2)
+      SERIES      =  MachineConstant   (3)
+---------------------------------------------------------------------------/-->
+
+   <~ChartMulti
+      name="lin8028"
+      style="Reports\Styles\LineChart"
+      type="Line"
+      height="350"
+      data="dat8028">
+      ~(1) ~(2) ~(3)
+   </~ChartMulti>
+
+<!-- End ReportComponent: 0008028 -->

@@ -1,0 +1,502 @@
+<!--
+   rc08026.htm
+
+   ReportComponent: 08026   - Machine Top 10 Applications Table
+
+   Details:
+      This widget displays a Machine Top 10 Application Table
+      
+         1. MachineCollection/When
+         
+      The context is detected by the presence/absence of Report.Param values that
+      are set by the various tabs and reports. The sql-statement is then selected 
+      based on the current context.
+   
+      The following is how the specific data for each row/column is obtained:
+      Query -  gets the "Usage Time", "Number of Days Used" and "Last Day Used" for
+               the TopN rows.
+      xRow -   calculates the "Average Daily Usage" for TopN.
+               create the "Other Applications" row.
+               calculate the "Usage Time" and "Avg Daily Usage" for "Other Apps" row.
+      Term -   create the "Summary" row.
+               calculate the "Usage Time" for the "Summary" row.
+               calculate the "Average Daily Usage" for the "Summary" row
+               calculate the "Percent of Total Usage" for the ALL rows
+      The "Other Apps" and "Summary" row will have "N/A" for the "Number of Days Used"
+               and "Last Day Used" columns.
+
+      Once all the calculations are performed, your typical data matrix will look 
+      something like the following (note: some formatting will be done in the table):
+      
+      Application 01       10:00    2:00     10%   5  24-April-01
+      Application 02       10:00    2:00     10%   5  24-April-01
+      Application 03       10:00    2:00     10%   5  24-April-01
+      Application 04       10:00    2:00     10%   5  24-April-01
+      Application 05       10:00    2:00     10%   5  24-April-01
+      Application 06       10:00    2:00     10%   5  24-April-01
+      Application 07       10:00    2:00     10%   5  24-April-01
+      Application 08       10:00    2:00     10%   5  24-April-01
+      Application 09       10:00    2:00     10%   5  24-April-01
+      Application 10       10:00    2:00     10%   5  24-April-01
+      Other Applications    5:00    1:00      5%  N/A         N/A
+      Summary             105:00   10:50    100%  N/A         N/A
+      
+     -------------------------------------------------------------------------------
+-->
+
+
+<!-----------------------------------------------------------------------------
+   SSI Code Tag: VB Scripts to support widget
+------------------------------------------------------------------------------>
+<~Code>
+
+   ' Global variables
+   dim TopN             ' the number of applications to display
+   TopN = 10            ' for now it will be fixed at 10
+   
+   dim DaysInReport     ' obtain the value here once rather than multiple times
+                        ' in the xRow function
+   DaysInReport = Report.Param("DaysInReport")
+   
+   dim othersRow        ' the "Others" row
+   dim othersPGIDs
+   dim NumberOfMachines ' the number of machines selected in the Machine tab
+   dim AverageDailyUsageDenominator ' denominator used in "avg daily usage" calculation
+   
+   '*************************************************************************
+   '_FHDR: dat8026_Init
+   '
+   '_PURPOSE:
+   '  Get the AverageDailyUsageDenominator value here since it is used several
+   '  times in our xRow/Term code
+   '
+   '_PARAMS:
+   '  none
+   '
+   '_RETURNS:
+   '  nothing
+   '
+   '_DETAIL:
+   '  Calculating the AverageDailyUsageDenominator value requires multiplying the
+   '  days in the reporting time span by the number of machines selected by the
+   '  user.
+   '
+   '  Also do divide by zero checks here for the AverageDailyUsageDenominator 
+   '  variable.  When it is zero we will change it to -1 so users know something
+   '  is not right.
+   '******************************************************************************
+   Function dat8026_Init
+      
+      Dim MachineIDList
+      Dim substitueString, substitution
+      Dim dailyFrequency
+      Dim Data
+      
+      MachineIDList = Split(Report.Param("CompleteMachineList"), ",")
+      
+      ' assign the NumberOfMachines variable.  add 1 to the upper bound since the
+      ' UBound() function returns the index and not a count
+      NumberOfMachines = UBound(MachineIDList, 1) + 1
+      
+      AverageDailyUsageDenominator = DaysInReport * NumberOfMachines
+      
+      ' divide by zero check for our denominator
+      ' if it is zero change it to -1 so users know something is wrong
+      if AverageDailyUsageDenominator = 0 then
+         AverageDailyUsageDenominator = -1
+      end if
+      
+      Set Data = Report.Data("dat8026")
+      
+      If ( Report.Param("WhenDailyFrequency_chkSunday") <> "false") Then 
+         dailyFrequency = "UU.DayofWeek = 7 OR "
+      End If
+
+      If ( Report.Param("WhenDailyFrequency_chkMonday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 1 OR "
+      End If
+      
+      If ( Report.Param("WhenDailyFrequency_chkTuesday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 2 OR "
+      End If
+      
+      If ( Report.Param("WhenDailyFrequency_chkWednesday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 3 OR "
+      End If
+      
+      If ( Report.Param("WhenDailyFrequency_chkThursday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 4 OR "
+      End If
+      
+      If ( Report.Param("WhenDailyFrequency_chkFriday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 5 OR "
+      End If
+      
+      If ( Report.Param("WhenDailyFrequency_chkSaturday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 6 OR "
+      End If                           
+
+      If ( Right(dailyFrequency, 3) = "OR " ) Then
+         dailyFrequency = Left(dailyFrequency, Len(dailyFrequency)-3)
+      End If
+
+      If dailyFrequency = "" Then dailyFrequency = "UU.DayofWeek = 99 "
+
+      substituteString = "***CRITERIA_WHERE***"
+      If (dailyFrequency <> "") Then dailyFrequency = " AND (" & dailyFrequency & ") "
+      n = Instr(data.SQLStatement, substituteString)
+      while n <> 0
+         Data.SQLStatement = left(Data.SQLStatement, n-1) &  dailyFrequency & mid(Data.SQLStatement, n+len(substituteString))
+         n = Instr(data.SQLStatement, substituteString)
+      wend  
+      
+      substituteString = "***STARTDATE***"
+      substitution = Report.Param("WhenDailyFrequency_txtFromDate")
+      n = Instr(data.SQLStatement, substituteString)
+      while n <> 0
+         Data.SQLStatement = left(Data.SQLStatement, n-1) &  substitution & mid(Data.SQLStatement, n+len(substituteString))
+         n = Instr(data.SQLStatement, substituteString)
+      wend        
+
+      substituteString = "***ENDDATE***"
+      substitution = Report.Param("WhenDailyFrequency_txtToDate")
+      n = Instr(data.SQLStatement, substituteString)
+      while n <> 0
+         Data.SQLStatement = left(Data.SQLStatement, n-1) &  substitution & mid(Data.SQLStatement, n+len(substituteString))
+         n = Instr(data.SQLStatement, substituteString)
+      wend       
+
+   End Function
+   
+   '******************************************************************************
+   '_FHDR: dat8026_xRow
+   '
+   '_PURPOSE:
+   '  Used to calculate/format values in our data matrix. Called for every row
+   '  in returned recordset
+   '
+   '_PARAMS:
+   '  rowNum   - number of incoming row
+   '
+   '_RETURNS:
+   '  none
+   '
+   '_DETAIL:
+   '   Set up the top N rows to be displayed
+   '   Calculate the "average daily usage" column
+   '   Populate the "Other Applications" row
+   '******************************************************************************
+   Function dat8026_xRow( rowNum )
+      
+      dim Data
+      dim curRow
+      dim iCol
+      
+      ' get handle to data matrix
+      set Data = Report.Data("dat8026")
+      
+      ' are we still in the top N?
+      if rowNum <= TopN then
+      
+         ' yes, so add a new application row to display
+         curRow = Data.AddRow
+      
+         ' copy over the pertinent data
+         for iCol = 1 to Data.Columns
+            Data.Val(curRow, iCol) = Data.Field(iCol-1)
+         next
+         
+         ' calculate the "average daily usage" column
+         Data.Val(curRow, 4) = Data.Field("UsageTime") / AverageDailyUsageDenominator
+         
+      ' no longer in top N so aggregate the rest of the data into an "Others" row
+      else
+         
+         ' create the "Others" row immediately following the TopN'th one
+         ' doing this insures we only create one "Others" row
+         if rowNum = TopN+1 then
+            othersRow = Data.AddRow
+            Data.Val(othersRow, 2) = "Other Applications"
+            Data.Val(othersRow, 6) = ""
+            Data.Val(othersRow, 7) = -1
+            othersPGIDs = Data.Field(0)
+         end if
+         
+         ' calculate the "Other Applications" row
+         Data.Val(othersRow, 3) = Data.Val(othersRow, 3) + Data.Field("UsageTime")  ' aggregate the usage row
+         Data.Val(othersRow, 4) = Data.Val(othersRow, 3) / AverageDailyUsageDenominator
+         
+         othersPGIDs = othersPGIDs & "," & Data.Field(0)
+         Data.Val(othersRow, 1) = othersPGIDs
+         Data.Val(othersRow, 2) = "Other Applications"
+      end if
+      
+      ' cleanup
+      set Data = nothing
+
+   End Function
+
+   '******************************************************************************
+   '_FHDR: dat8026_Term
+   '
+   '_PURPOSE:
+   '  Finish 
+   '
+   '_PARAMS:
+   ' (none)
+   '
+   '_RETURNS:
+   '  a parameter list which was the same as before the xRow function was called
+   '
+   '_DETAIL:
+   '  Create/Populate the "Summary" row
+   '  Get the total "Usage Time" so we can perform the rest of our calculations
+   '  Calculate the "Average Daily Usage" for the "Summary" row
+   '  Calculate the "Percent of Total Usage" for the TopN rows
+   '  Calculate the "Percent of Total Usage" for the "Summary" row
+   '   
+   '******************************************************************************
+   Function dat8026_Term
+      
+      dim Data    ' data matrix
+      dim curRow  ' current row being processed
+      dim iRow    ' row counter
+      
+      ' get handle to data matrix
+      set Data = Report.Data("dat8026")
+      
+      ' do not create the "Summary" row if the record set is empty
+      if Data.Rows = 0 then
+         Exit Function
+      end if
+      
+'      ' create the "Summary" row
+'      curRow = Data.AddRow
+      
+'      ' populate the "Summary" row
+'      Data.Val(curRow, 2) = "Summary"
+'      Data.Val(curRow, 6) = "N/A"
+'      Data.Val(curRow, 7) = "N/A"
+
+      TotalUsageTime = 0
+      ' calculate the "Usage Time" for the "Summary" row
+      for iRow = 1 to Data.Rows   ' make sure to exclude the "Summary" row from our calculations
+         TotalUsageTime = TotalUsageTime + Data.Val(iRow, 3)
+      next
+      
+      ' now we have the total "Usage Time" and we can perform the rest of our calculations
+'      dim TotalUsageTime
+'      TotalUsageTime = Data.Val(curRow, 3)
+      
+'      ' calculate the "Average Daily Usage" for the "Summary" row
+'      Data.Val(curRow, 4) = TotalUsageTime / AverageDailyUsageDenominator
+      
+      ' calculate the "Percent of Total Usage" for the TopN rows
+      for iRow = 1 to Data.Rows   ' make sure to exclude the "Summary" row from our calculations
+         Data.Val(iRow, 5) = Data.Val(iRow, 3) / TotalUsageTime
+      next
+      
+'      ' calculate the "Percent of Total Usage" for the "Summary" row
+'      for iRow = 1 to Data.Rows   ' make sure to exclude the "Summary" row from our calculations
+'         Data.Val(curRow, 5) = Data.Val(curRow, 5) + Data.Val(iRow, 5)
+'      next
+
+      ' cleanup
+      set Data = nothing
+      
+   End Function
+   
+</~Code>
+
+<~GridColumn Name="ProgramGroupID"
+         DataType="S"
+         System="1"
+         Key="1" />
+<~GridColumn Name="ProgramGroupName" 
+         Caption="Application Name"
+         DataType="S"
+         Width="2900"
+         SortOrder="2"
+         Style="Drilldown" />
+<~GridColumn Name="UsageTime" 
+         Caption="Usage Time (h:mm)"
+         Width="1000"
+         SortOrder="-1"
+         DataType="U"/>
+<~GridColumn Name="AverageDailyUsage" 
+         Caption="Average Machine Usage per Day (h:mm)"
+         Width="1300"
+         DataType="U"/>
+<~GridColumn Name="PercentOfTotalUsage" 
+         Caption="Percent of Total Usage"
+         Width="1000"
+         DataType="P1"/>
+<~GridColumn Name="NumberOfDaysUsed" 
+         Caption="Number of Days Used"
+         Width="1000"
+         DataType="S"
+         Justify="right"/>
+<~GridColumn Name="LastDayUsed" 
+         Caption="Last Day Used"
+         Width="1400"
+         DataType="DS"/>
+
+<~GridSQL name=dat8026>
+/*
+   Widget 8026
+   
+   RecordSet Details:
+
+   Column   Field Name           Friendly Name
+   ------   ----------------     -------------
+   1        ProgramGroupID       Program Group ID
+   2        ProgramGroupName     Program Group Name
+   3        UsageTime            Usage Time
+   4        AverageDailyUsage    Average Daily Usage
+   5        PercentOfTotalUsage  Percent of Total Usage
+   6        NumberOfDaysUsed     Number of Days Used
+   7        LastDayUsed          Last Day Used
+   
+   Details:
+      Column 4 and 5 will be properly populated by the xRow function.
+      An "Other Applications" and "Summary" row will be added/calcuated
+      in xRow/Term.
+*/
+
+SELECT UU.ProgramGroupID
+, UU.ProgramGroupName ProgramGroupName
+, sum(UU.ActiveDay) UsageTime
+, sum(1) AverageDailyUsage
+, sum(1) PercentOfTotalUsage
+, count(DISTINCT UU.UsageDate) NumberOfDaysUsed
+, max(UU.UsageDate) LastDayUsed
+FROM UserUsageProgramGroup UU
+WHERE UU.UsageDate BETWEEN ***STARTDATE*** AND ***ENDDATE***
+***CRITERIA_WHERE***
+AND UU.ActiveDay > 0 /* necessary to filter out invalid "Number of days used" values */
+AND UU.ProgramGroupID in   
+   (select distinct PG.ProgramGroupID
+   from ProgramGroup PG
+   left join SWCategoryMembership SWCM on PG.ProgramGroupID = SWCM.ProgramGroupID
+   where (isnull(SWCM.ProgramGroupID, -666) = case when [Catalog_rdoCatalogOrSystem] = 6 then isnull(SWCM.ProgramGroupID, -666) else -666 end
+   and isnull(SWCM.CategoryID, -666) = case when [Catalog_chkUseCategories] = 1 then [Catalog_cmbCategoryID] else isnull(SWCM.CategoryID, -666) end
+   and PG.ProgramGroupType = [Catalog_rdoCatalogOrSystem])
+   or PG.ProgramGroupType in (case when [Catalog_chkShowWebApps] = 1 then 1 else -1 end, 7))
+AND (UU.MachineID in ([MachineCollections_listMachines])
+OR UU.MachineID in 
+   (select CM.ResourceID 
+   from CommunityMembership CM 
+   inner join Agent A on CM.ResourceID = A.MachineID
+   where CM.CommunityID in ([MachineCollections_listCollections])
+   and CM.ResourceType = 2))
+GROUP BY UU.ProgramGroupName, UU.ProgramGroupID
+ORDER BY UsageTime DESC, ProgramGroupName
+
+</~GridSQL>
+   
+   
+<!-----------------------------------------------------------------------------
+   Data Matrix Columns:
+      ProgramGroupID       = col 1   (invisible)
+      ProgramGroupName     = col 2
+      UsageTime            = col 3
+      AverageDailyUsage    = col 4
+      PercentOfTotalUsage  = col 5
+      NumberOfDaysUsed     = col 6
+      LastDayUsed          = col 7
+---------------------------------------------------------------------------/-->
+<script language="JavaScript" src="Reports/Scripts/drillDown.js"></script>
+<script language="Javascript">
+   function toApplicationDetailDrillDown(appID)
+   {
+      if (parent.frContentTabs)
+      {
+         //save off the parameters
+         saveDrillDownParameters("<~Param>OutputID</~Param>","<~Param>ArchID</~Param>" , 45
+                                       , populateMachineCollectionTab('<~Param>MachineCollections_rdoMachinesOrCollections</~Param>'
+                                                            , '<~Param>MachineCollections_listMachines</~Param>'
+                                                            , '<~Param>MachineCollections_iMachineCount</~Param>'
+                                                            , '<~Param>MachineCollections_listCollections</~Param>'
+                                                            , '<~Param>MachineCollections_iCollectionCount</~Param>') +                                       
+                                       ";" + populateWhenTab('<~Param>When_rdoSpan</~Param>',
+	                                                         '<~Param>When_cboSpan</~Param>',
+	                                                         '<~Param>When_txtFromDate</~Param>',
+	                                                         '<~Param>When_txtToDate</~Param>',
+	                                                         '<~Param>When_chkSunday</~Param>',
+	                                                         '<~Param>When_chkMonday</~Param>',
+	                                                         '<~Param>When_chkTuesday</~Param>',
+	                                                         '<~Param>When_chkWednesday</~Param>',
+	                                                         '<~Param>When_chkThursday</~Param>',
+	                                                         '<~Param>When_chkFriday</~Param>',
+	                                                         '<~Param>When_chkSaturday</~Param>'	                                                       
+	                                                         ) +
+                                       ";" + populateWhatTab(appID) +
+                                       ";" + populateCriteriaUsageTab(0,0,0,0,0,0,0) +
+                                       ";" + addOldReportInformation('<~Param>ArchID</~Param>',
+                                                                     '<~Param>OutputID</~Param>',
+                                                                     '<~Param>RunID</~Param>',
+                                                                     '<~Param>FolderID</~Param>',
+                                                                     '<~Param>FolderType</~Param>'
+                                                                     )
+         );
+         return;
+      }
+      else
+      {
+         window.open("SurveyUser.ASP?SurveyUser.Drilldown.StandAloneDrilldown(45," +
+                                       populateMachineCollectionTab('<~Param>MachineCollections_rdoMachinesOrCollections</~Param>'
+                                                            , '<~Param>MachineCollections_listMachines</~Param>'
+                                                            , '<~Param>MachineCollections_iMachineCount</~Param>'
+                                                            , '<~Param>MachineCollections_listCollections</~Param>'
+                                                            , '<~Param>MachineCollections_iCollectionCount</~Param>') +                                       
+                                       ";" + populateWhenTab('<~Param>When_rdoSpan</~Param>',
+	                                                         '<~Param>When_cboSpan</~Param>',
+	                                                         '<~Param>When_txtFromDate</~Param>',	                                                         
+	                                                         '<~Param>When_txtToDate</~Param>',
+	                                                         '<~Param>When_chkSunday</~Param>',
+	                                                         '<~Param>When_chkMonday</~Param>',
+	                                                         '<~Param>When_chkTuesday</~Param>',
+	                                                         '<~Param>When_chkWednesday</~Param>',
+	                                                         '<~Param>When_chkThursday</~Param>',
+	                                                         '<~Param>When_chkFriday</~Param>',
+	                                                         '<~Param>When_chkSaturday</~Param>'
+	                                                         ) +
+                                       ";" + populateWhatTab(appID) +
+                                       ";" + populateCriteriaUsageTab(0,0,0,0,0,0,0) +
+                                       ")",null,"location=no,menubar=no,toolbar=yes,resizable=yes");
+         return;
+      }
+   }
+</script>
+<script language="javascript">
+   /////////////////////////////////////////////////////////////////////////
+   function <~rcName />Grid_onLoad()
+   {
+      Grid_onLoad('<~rcName />Grid', '<~rcTemplateName />');
+   }
+   /////////////////////////////////////////////////////////////////////////
+   function <~rcName />Grid_RefreshComplete(ErrCode)
+   {
+      setHeight('<~rcName />Grid');
+   }
+   /////////////////////////////////////////////////////////////////////////
+   function <~rcName />Grid_onDblClick(rowId,colName)
+   {
+      var rowType = <~rcName />Grid.RowType(rowId);
+      //This is a header row...so don't drilldown
+      if(rowType == 1)
+      {
+         return;
+      }
+      var programGroupID = <~rcName />Grid.Value(rowId, 'ProgramGroupID');      
+      switch(colName)
+      {
+         case "ProgramGroupName":
+            toApplicationDetailDrillDown(programGroupID);
+            break;
+      }
+   }
+</script>
+<~Include name=Reports/GenericGrid.htm></~Include>
+
+<!-- End ReportComponent: 0008026 -->

@@ -1,0 +1,416 @@
+<!--
+   rc08027.htm
+
+   ReportComponent: 08027   - Machine Application Average Daily Usage
+
+   Details:
+      This widget displays a Machine Application Average Daily Usage bar chart
+      
+         1. MachineCollections/When
+         
+      The context is detected by the presence/absence of Report.Param values that
+      are set by the various tabs and reports. The sql-statement is then selected 
+      based on the current context.
+   
+      The following is how the specific data for each row/column is obtained:
+      Query -  gets ALL the data rows
+      xRow -   splits up the TopN and "Others" rows.
+
+     -------------------------------------------------------------------------------
+-->
+
+
+<!-----------------------------------------------------------------------------
+   SSI Code Tag: VB Scripts to support widget
+------------------------------------------------------------------------------>
+<~Code>
+
+   ' Global variables
+   dim TopN             ' the number of applications to display
+   TopN = 10            ' for now it will be fixed at 10
+   
+   dim DaysInReport     ' obtain the value here once rather than multiple times
+                        ' in the xRow function
+   DaysInReport = Report.Param("DaysInReport")
+   
+   dim othersRow        ' the "Others" row
+   dim NumberOfMachines ' the number of machines selected in the Machine tab
+   
+
+   Dim TotalMinutesPerHour(23) '
+   
+   '*************************************************************************
+   '_FHDR: dat8027_Init
+   '
+   '_PURPOSE:
+   '  Get the NumberOfMachines value
+   '
+   '_PARAMS:
+   '  none
+   '
+   '_RETURNS:
+   '  nothing
+   '
+   '_DETAIL:
+   '  Get the Number of Machines selected by the user from the tab
+   '  Do necessary replacements in the query
+   '******************************************************************************
+   Function dat8027_Init
+      Dim substitueString, substitution
+      Dim dailyFrequency
+      Dim Data
+      
+      set Data = Report.Data("dat8027")
+      
+      If ( Report.Param("WhenDailyFrequency_chkSunday") <> "false") Then 
+         dailyFrequency = "UU.DayofWeek = 7 OR "
+      End If
+
+      If ( Report.Param("WhenDailyFrequency_chkMonday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 1 OR "
+      End If
+      
+      If ( Report.Param("WhenDailyFrequency_chkTuesday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 2 OR "
+      End If
+      
+      If ( Report.Param("WhenDailyFrequency_chkWednesday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 3 OR "
+      End If
+      
+      If ( Report.Param("WhenDailyFrequency_chkThursday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 4 OR "
+      End If
+      
+      If ( Report.Param("WhenDailyFrequency_chkFriday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 5 OR "
+      End If
+      
+      If ( Report.Param("WhenDailyFrequency_chkSaturday") <> "false") Then 
+         dailyFrequency = dailyFrequency & "UU.DayofWeek = 6 OR "
+      End If                              
+
+      If ( Right(dailyFrequency, 3) = "OR " ) Then
+         dailyFrequency = Left(dailyFrequency, Len(dailyFrequency)-3)
+      End If
+
+     If dailyFrequency = "" Then dailyFrequency = "UU.DayofWeek = 99 "
+
+      substituteString = "***CRITERIA_WHERE***"
+      If (dailyFrequency <> "") Then dailyFrequency = " AND (" & dailyFrequency & ") "
+      n = Instr(data.SQLStatement, substituteString)
+      while n <> 0
+         Data.SQLStatement = left(Data.SQLStatement, n-1) &  dailyFrequency & mid(Data.SQLStatement, n+len(substituteString))
+         n = Instr(data.SQLStatement, substituteString)
+      wend  
+
+      substituteString = "***STARTDATE***"
+      substitution = Report.Param("WhenDailyFrequency_txtFromDate")
+      n = Instr(data.SQLStatement, substituteString)
+      while n <> 0
+         Data.SQLStatement = left(Data.SQLStatement, n-1) &  substitution & mid(Data.SQLStatement, n+len(substituteString))
+         n = Instr(data.SQLStatement, substituteString)
+      wend        
+
+      substituteString = "***ENDDATE***"
+      substitution = Report.Param("WhenDailyFrequency_txtToDate")
+      n = Instr(data.SQLStatement, substituteString)
+      while n <> 0
+         Data.SQLStatement = left(Data.SQLStatement, n-1) &  substitution & mid(Data.SQLStatement, n+len(substituteString))
+         n = Instr(data.SQLStatement, substituteString)
+      wend       
+              
+   End Function
+   
+   '******************************************************************************
+   '_FHDR: dat8027_xRow
+   '
+   '_PURPOSE:
+   '  Construct the TopN and "Other Applications" rows
+   '
+   '_PARAMS:
+   '  rowNum   - number of incoming row
+   '
+   '_RETURNS:
+   '  none
+   '
+   '_DETAIL:
+   '   Set up the top N rows to be displayed
+   '   Populate the "Other Applications" row
+   '******************************************************************************
+   Function dat8027_xRow( rowNum )
+      
+      dim Data
+      dim curRow
+      dim iCol
+      dim i       ' for loop counter
+      
+      ' get handle to data matrix
+      set Data = Report.Data("dat8027")
+   
+      ' aggregate the total minutes in each hourly bucket so we can determine
+      ' later whether or not we need to expand the chart range
+      for i = 0 to 23
+         TotalMinutesPerHour(i) = TotalMinutesPerHour(i) + Data.Field(1+i)
+      next
+
+      ' are we still in the top N?
+      if rowNum <= TopN then
+      
+         ' yes, so add a new application row to display
+         curRow = Data.AddRow("l")
+      
+         ' copy over the pertinent data
+         for iCol = 1 to Data.Columns
+            Data.Val(curRow, iCol) = Data.Field(iCol-1)
+         next
+         
+      ' no longer in top N so aggregate the rest of the data into an "Others" row
+      else
+         
+         ' create the "Others" row immediately following the TopN'th one
+         ' doing this insures we only create one "Others" row
+         if rowNum = TopN + 1 then
+            othersRow = Data.AddRow("l")
+            Data.Val(othersRow, 1) = "Other Applications"
+         end if
+         
+         ' populate the "Other Applications" row
+         for iCol = 2 to Data.Columns
+            Data.Val(othersRow, iCol) = Data.Val(othersRow, iCol) + Data.Field(iCol-1)
+         next
+
+      end if
+      
+      ' cleanup
+      set Data = nothing
+
+   End Function
+
+   '******************************************************************************
+   '_FHDR: bar8027_Init
+   '
+   '_PURPOSE:
+   '  To set the chart up in a standard form
+   '
+   '_PARAMS:
+   '  none
+   '
+   '_RETURNS:
+   '  a chart set up as specified in the specs for the widget
+   '
+   '_DETAIL:
+   '   -Add the labels to the hours on the bottom
+   '   -Hard code the X and Y Axises
+   '   
+   '******************************************************************************
+   Function bar8027_Init
+      
+      Dim Chart
+      set Chart = Report.myChart
+
+      ' label the x and y axis
+      Chart.param("rangeAxisLabel") ="Minutes &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp"
+      Chart.Param("sampleAxisLabel") = "Hours of the Day"
+      
+      ' find the largest hourly bucket.  if it is > 60 the chart range will have to change
+      dim MaxHourlyBucket
+      MaxHourlyBucket = 0
+      for i = 0 to 23
+         if MaxHourlyBucket < TotalMinutesPerHour(i) then
+            MaxHourlyBucket = TotalMinutesPerHour(i)
+         end if
+      next
+      
+      ' do we have any hourly buckets bigger than 60 minutes per hour?
+      if MaxHourlyBucket < 60 then
+         ' no, keep the range fixed at 60 minutes
+         Chart.param("range") = 60
+      else
+         ' yes, so change the range to fit the max hourly bucket
+         Chart.param("range") = MaxHourlyBucket
+      end if
+      
+      ' set the "lowerRange", not sure why we do this
+      Chart.param("lowerRange") = 0
+      
+      ' setup the labels for the x-axis
+      dim iBucket    ' for loop counter to populate the x-axis labels
+      for iBucket = 0 to 23
+         
+         if Report.is12HourTime() then
+            if iBucket = 0 then
+               sTime = "12" & Report.getAMPMString(True)
+            elseif iBucket <12 then
+               sTime = cstr(iBucket) & Report.getAMPMString(True)
+            elseif iBucket =12 then
+               sTime = cstr(iBucket) & Report.getAMPMString(False)
+            else
+               sTime = cstr(iBucket-12) & Report.getAMPMString(False)
+            end if
+         else
+            sTime = iBucket
+         end if
+
+         ' display only the even hours on our x-axis
+         if (iBucket mod 2) = 0 then
+            Chart.AddCategory cstr(sTime), cstr(iBucket)
+         else
+            Chart.AddCategory " ", cstr(iBucket)
+         end if
+      
+      next
+      
+      'Clean up
+      set Chart = Nothing
+      
+   End Function
+
+</~Code>
+
+<!-----------------------------------------------------------------------------
+   SSI SQL Tag:  Used to set SQL Statement for USER Context
+   ...this context is used by R39 and R24
+   CRK removed ResourceContext=USERz, as it was vestigial
+---------------------------------------------------------------------------/-->
+
+<~SQL name=dat8027>
+/*
+   Widget 8027
+   
+   RecordSet Details:
+   
+   Column   Field Name           Friendly Name
+   ------   ----------------     -------------
+   1        Name                 Program Group Name
+   2-25     ActiveXX             ActiveXX - where XX is the two digit hourly bucket number
+   26       AppActiveDay         Application Active Day
+   27       AppID                Application ID
+
+*/
+SELECT UU.ProgramGroupName
+, convert(float, sum(UU.Active00)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active00
+, convert(float, sum(UU.Active01)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active01  
+, convert(float, sum(UU.Active02)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active02  
+, convert(float, sum(UU.Active03)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active03  
+, convert(float, sum(UU.Active04)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active04  
+, convert(float, sum(UU.Active05)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active05  
+, convert(float, sum(UU.Active06)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active06  
+, convert(float, sum(UU.Active07)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active07  
+, convert(float, sum(UU.Active08)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active08  
+, convert(float, sum(UU.Active09)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active09  
+, convert(float, sum(UU.Active10)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active10  
+, convert(float, sum(UU.Active11)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active11  
+, convert(float, sum(UU.Active12)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active12  
+, convert(float, sum(UU.Active13)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active13  
+, convert(float, sum(UU.Active14)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active14  
+, convert(float, sum(UU.Active15)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active15  
+, convert(float, sum(UU.Active16)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active16  
+, convert(float, sum(UU.Active17)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active17  
+, convert(float, sum(UU.Active18)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active18  
+, convert(float, sum(UU.Active19)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active19  
+, convert(float, sum(UU.Active20)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active20  
+, convert(float, sum(UU.Active21)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active21  
+, convert(float, sum(UU.Active22)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active22  
+, convert(float, sum(UU.Active23)) / convert(float, case when ( [DaysInReport] * MachCount.MC ) = 0 then -1 else ( [DaysInReport] * MachCount.MC ) end) active23  
+, sum(UU.ActiveDay) AppActiveDay
+, UU.ProgramGroupID AppID
+FROM
+   (select count(distinct UU.MachineID) MC
+   from
+      (select UU.MachineID
+      , count(UU.ProgramID) PC
+      from UserUsageProgramGroup UU
+      where UU.UsageDate BETWEEN ***STARTDATE*** AND ***ENDDATE***
+      ***CRITERIA_WHERE***
+      and UU.ActiveDay > 0
+      AND UU.ProgramGroupID in   
+         (select distinct PG.ProgramGroupID
+         from ProgramGroup PG
+         left join SWCategoryMembership SWCM on PG.ProgramGroupID = SWCM.ProgramGroupID
+         where (isnull(SWCM.ProgramGroupID, -666) = case when [Catalog_rdoCatalogOrSystem] = 6 then isnull(SWCM.ProgramGroupID, -666) else -666 end
+         and isnull(SWCM.CategoryID, -666) = case when [Catalog_chkUseCategories] = 1 then [Catalog_cmbCategoryID] else isnull(SWCM.CategoryID, -666) end
+         and PG.ProgramGroupType = [Catalog_rdoCatalogOrSystem])
+         or PG.ProgramGroupType in (case when [Catalog_chkShowWebApps] = 1 then 1 else -1 end, 7))
+      group by UU.MachineID
+      ) UU
+   where (UU.MachineID in ([MachineCollections_listMachines])
+      OR UU.MachineID in 
+         (select CM.ResourceID 
+         from CommunityMembership CM 
+         inner join Agent A on CM.ResourceID = A.MachineID
+         where CM.CommunityID in ([MachineCollections_listCollections])
+         and CM.ResourceType = 2))
+   ) MachCount,
+   (select UU.ProgramGroupID
+   , UU.ProgramGroupName
+   , UU.MachineID
+   , convert(float, sum(UU.Active00)) active00
+   , convert(float, sum(UU.Active01)) active01  
+   , convert(float, sum(UU.Active02)) active02  
+   , convert(float, sum(UU.Active03)) active03  
+   , convert(float, sum(UU.Active04)) active04  
+   , convert(float, sum(UU.Active05)) active05  
+   , convert(float, sum(UU.Active06)) active06  
+   , convert(float, sum(UU.Active07)) active07  
+   , convert(float, sum(UU.Active08)) active08  
+   , convert(float, sum(UU.Active09)) active09  
+   , convert(float, sum(UU.Active10)) active10  
+   , convert(float, sum(UU.Active11)) active11  
+   , convert(float, sum(UU.Active12)) active12  
+   , convert(float, sum(UU.Active13)) active13  
+   , convert(float, sum(UU.Active14)) active14  
+   , convert(float, sum(UU.Active15)) active15  
+   , convert(float, sum(UU.Active16)) active16  
+   , convert(float, sum(UU.Active17)) active17  
+   , convert(float, sum(UU.Active18)) active18  
+   , convert(float, sum(UU.Active19)) active19  
+   , convert(float, sum(UU.Active20)) active20  
+   , convert(float, sum(UU.Active21)) active21  
+   , convert(float, sum(UU.Active22)) active22  
+   , convert(float, sum(UU.Active23)) active23  
+   , convert(float, sum(UU.ActiveDay)) activeDay  
+   from UserUsageProgramGroup UU
+   where UU.UsageDate BETWEEN ***STARTDATE*** AND ***ENDDATE***
+   ***CRITERIA_WHERE***
+   AND UU.ProgramGroupID in   
+      (select distinct PG.ProgramGroupID
+      from ProgramGroup PG
+      left join SWCategoryMembership SWCM on PG.ProgramGroupID = SWCM.ProgramGroupID
+      where (isnull(SWCM.ProgramGroupID, -666) = case when [Catalog_rdoCatalogOrSystem] = 6 then isnull(SWCM.ProgramGroupID, -666) else -666 end
+      and isnull(SWCM.CategoryID, -666) = case when [Catalog_chkUseCategories] = 1 then [Catalog_cmbCategoryID] else isnull(SWCM.CategoryID, -666) end
+      and PG.ProgramGroupType = [Catalog_rdoCatalogOrSystem])
+      or PG.ProgramGroupType in (case when [Catalog_chkShowWebApps] = 1 then 1 else -1 end, 7))
+   group by UU.ProgramGroupID, UU.ProgramGroupName, UU.MachineID
+   ) UU
+where (UU.MachineID in ([MachineCollections_listMachines])
+   OR UU.MachineID in 
+      (select CM.ResourceID 
+      from CommunityMembership CM 
+      inner join Agent A on CM.ResourceID = A.MachineID
+      where CM.CommunityID in ([MachineCollections_listCollections])
+      and CM.ResourceType = 2))
+and UU.ActiveDay > 0
+GROUP BY UU.ProgramGroupName, UU.ProgramGroupID, MachCount.MC
+ORDER BY AppActiveDay desc, UU.ProgramGroupName
+</~SQL>
+
+<!-----------------------------------------------------------------------------
+   Data Matrix Columns:
+      AppName              =   col 1
+      ActiveXX             =   col 2-25
+---------------------------------------------------------------------------/-->
+
+<!-- Temporary color scheme to use -->
+<~Include name="Reports\Scripts\Top10Colors.bas" type="once"></~Include>
+
+   <~ChartMultiCol
+      name="bar8027"
+      style="Reports\Styles\BarChartStacked"
+      type="Bar"
+      height="350"
+      data="dat8027">
+      ~(2) ~(25) ~(1)
+   </~ChartMultiCol>
+
+<!-- End ReportComponent: 08027 -->
