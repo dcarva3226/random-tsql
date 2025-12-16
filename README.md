@@ -4,7 +4,7 @@ These are some random files containing useful T-SQL examples. Saving in case I n
 ## License
 MIT License
 
-Copyright (c) 2005 Dann Carvajal
+Copyright (c) 2005 Danny Carvajal
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
